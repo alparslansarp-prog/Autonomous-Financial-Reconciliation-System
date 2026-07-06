@@ -1,0 +1,149 @@
+﻿@page "/"
+@inject HttpClient Http
+
+<PageTitle>Otonom Finans</PageTitle>
+
+<div class="container mt-5">
+    <h2 class="mb-4">Yapay Zeka Destekli Fatura & Hakediş Girişi</h2>
+    
+    <div class="row">
+        <!-- Form Kısmı -->
+        <div class="col-md-6">
+            <div class="card shadow-sm p-4">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Belge Adı</label>
+                    <input class="form-control" @bind="invoice.DocumentName" placeholder="Örn: Taseron_Hakedis_Temmuz.pdf" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Belge Metni (OCR Çıktısı)</label>
+                    <textarea class="form-control" @bind="invoice.RawText" rows="4" placeholder="Metni buraya yapıştırın..."></textarea>
+                </div>
+                <div class="row">
+                    <div class="col">
+                        <label class="form-label fw-bold">Toplam Tutar (TL)</label>
+                        <input type="number" class="form-control" @bind="invoice.TotalAmount" />
+                    </div>
+                    <div class="col">
+                        <label class="form-label fw-bold">Vergi Tutarı (TL)</label>
+                        <input type="number" class="form-control" @bind="invoice.TaxAmount" />
+                    </div>
+                </div>
+                <button class="btn btn-primary mt-4 w-100" @onclick="ProcessInvoice" disabled="@isLoading">
+                    @if (isLoading)
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                        <span> Yapay Zeka Analiz Ediyor...</span>
+                    }
+                    else
+                    {
+                        <span>Sisteme İşle</span>
+                    }
+                </button>
+            </div>
+        </div>
+
+        <!-- Sonuç Kısmı -->
+        <div class="col-md-6">
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="alert alert-danger shadow-sm">
+                    <strong>Guardrail Engeli:</strong> @errorMessage
+                </div>
+            }
+            
+            @if (result != null)
+            {
+                <div class="card shadow-sm p-4 border-success">
+                    <h4 class="text-success mb-3">İşlem Başarılı</h4>
+                    <ul class="list-group list-group-flush mb-3">
+                        <li class="list-group-item"><strong>Önerilen Kategori:</strong> @GetCategoryName(result.SuggestedCategory)</li>
+                        <li class="list-group-item"><strong>Güven Skoru:</strong> %@result.ConfidenceScore</li>
+                        <li class="list-group-item"><strong>Gerekçe:</strong> @result.Reasoning</li>
+                    </ul>
+                    
+                    @if(result.NeedsManualReview)
+                    {
+                        <div class="alert alert-warning mb-0">⚠️ Sistem kararsız kaldı, manuel inceleme gerekiyor.</div>
+                    }
+                    else
+                    {
+                        <div class="alert alert-success mb-0">✅ Veri otomatik olarak muhasebe sistemine aktarıldı.</div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private InvoiceRecordDto invoice = new();
+    private CategorizationResultDto? result;
+    private bool isLoading = false;
+    private string? errorMessage;
+
+    // ÖNEMLİ: Buradaki port numarasını API'nin çalıştığı port ile değiştirmelisin (Örn: 5241)
+    private readonly string apiBaseUrl = "http://127.0.0.1:5004/api/InvoiceProcessing/process";
+
+    private async Task ProcessInvoice()
+    {
+        isLoading = true;
+        errorMessage = null;
+        result = null;
+
+        try
+        {
+            var response = await Http.PostAsJsonAsync(apiBaseUrl, invoice);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var apiResponse = await response.Content.ReadFromJsonAsync<ApiResponse>();
+                result = apiResponse?.Data;
+            }
+            else
+            {
+                // BadRequest (Guardrail) yakalama
+                var errorContent = await response.Content.ReadAsStringAsync();
+                errorMessage = errorContent.Contains("Error") ? errorContent : "İş kuralı ihlali veya sunucu hatası.";
+            }
+        }
+       catch (Exception ex)
+{
+    errorMessage = $"Bağlantı engellendi. Tarayıcı Detayı: {ex.Message}";
+}
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private string GetCategoryName(int categoryId)
+    {
+        return categoryId switch
+        {
+            0 => "Yemek",
+            1 => "Seyahat",
+            2 => "Ofis Gideri",
+            3 => "Donanım",
+            4 => "Yazılım",
+            _ => "Tanımsız"
+        };
+    }
+
+    public class InvoiceRecordDto
+    {
+        public string DocumentName { get; set; } = string.Empty;
+        public string RawText { get; set; } = string.Empty;
+        public decimal TotalAmount { get; set; }
+        public decimal TaxAmount { get; set; }
+    }
+
+    public class CategorizationResultDto
+    {
+        public int SuggestedCategory { get; set; }
+        public int ConfidenceScore { get; set; }
+        public string Reasoning { get; set; } = string.Empty;
+        public bool NeedsManualReview { get; set; }
+    }
+
+    public class ApiResponse { public CategorizationResultDto Data { get; set; } }
+}

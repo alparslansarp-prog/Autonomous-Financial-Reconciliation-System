@@ -1,0 +1,6 @@
+@OtonomFinansAPI_HostAddress = http://localhost:5004
+
+GET {{OtonomFinansAPI_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
